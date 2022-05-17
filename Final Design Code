@@ -1,0 +1,295 @@
+
+
+
+////////////////////////////////////////////////////////////////////////////////
+#include <HX711_ADC.h>
+#include <HX711.h>
+#if defined(ESP8266)|| defined(ESP32) || defined(AVR)
+#include <EEPROM.h>
+#endif
+
+int tareButtonPin = 7;
+byte TarebuttonState = 0;
+int lastButtonTareState = 0;
+
+
+
+// Load Cell Threshold: pins from arduino to load cell
+
+const int HX711_dout = 12; //mcu > HX711 dout pin
+const int HX711_sck = 13; //mcu > HX711 sck pin
+
+//HX711 constructor: This portion draws data from the load cell and converts the information into grams.
+
+HX711_ADC LoadCell(HX711_dout, HX711_sck); 
+
+const int calVal_eepromAdress = 0;
+unsigned long t = 0;
+
+
+void setup() {
+  Serial.begin(57600); delay(10);
+  Serial.println();
+  Serial.println("Starting...");
+
+  LoadCell.begin();
+  //LoadCell.setReverseOutput(); //uncomment to turn a negative output value to positive
+  float calibrationValue; // calibration value (see example file "Calibration.ino")
+  calibrationValue = 696.0; // uncomment this if you want to set the calibration value in the sketch
+#if defined(ESP8266)|| defined(ESP32)
+  //EEPROM.begin(512); // uncomment this if you use ESP8266/ESP32 and want to fetch the calibration value from eeprom
+#endif
+  EEPROM.get(calVal_eepromAdress, calibrationValue); // uncomment this if you want to fetch the calibration value from eeprom
+
+  unsigned long stabilizingtime = 2000; // preciscion right after power-up can be improved by adding a few seconds of stabilizing time
+  boolean _tare = true; //set this to false if you don't want tare to be performed in the next step
+  LoadCell.start(stabilizingtime, _tare);
+  if (LoadCell.getTareTimeoutFlag()) {
+    Serial.println("Timeout, check MCU>HX711 wiring and pin designations");
+    while (1);
+  }
+  else {
+    LoadCell.setCalFactor(calibrationValue); // set calibration value (float)
+    Serial.println("Startup is complete");
+  }
+}
+
+////// Code written by Team 2
+void tarebutton(){
+  TarebuttonState = digitalRead(tareButtonPin);
+  if (TarebuttonState != lastButtonTareState){
+    if(TarebuttonState == HIGH){
+      TarebuttonState = true;
+      LoadCell.tare();
+    }
+  }
+  lastButtonTareState = TarebuttonState;  
+}
+
+
+void weight_loop() {
+  static boolean newDataReady = 0;
+  const int serialPrintInterval = 0; //increase value to slow down serial print activity
+
+  // check for new data/start next conversion:
+  if (LoadCell.update()) {
+    newDataReady = true;
+  }
+
+  // get smoothed value from the dataset:
+  if (newDataReady) {
+    if (millis() > t + serialPrintInterval) {
+      float weight = LoadCell.getData();
+      Serial.print("Load_cell output val: ");
+      Serial.println(weight);
+      newDataReady = 0;
+      t = millis();
+    }
+  }
+
+  // receive command from serial terminal, send 't' to initiate tare operation:
+  if (Serial.available() > 0) {
+    char inByte = Serial.read();
+    if (inByte == 't') LoadCell.tareNoDelay();
+  }
+   // check if last tare operation is complete:
+
+   if (LoadCell.getTareStatus() == true) {
+   Serial.println("Tare complete");
+  }
+    if (digitalRead(tareButtonPin) == LOW) {
+      LoadCell.tareNoDelay();
+  }
+  
+}
+
+
+const int buttonPin = 2; // the number of the pushbutton pin (treat type)
+const int ledPin1 = 3;   // the number of the LED pin (sweet potato)
+const int ledPin2 = 4;   // the number of the LED pin (peanut butter)
+const int ledPin3 = 5;   // the number of the LED pin (chicken)
+const int ledPin4 = 6;   // the number of the LED pin (bits)
+
+// variables will change:
+int buttonState = 0;     // variable for reading the pushbutton status
+int buttonPressCount = 0;
+int CurrentTreatType = 0;
+int LastTreatType = 0;
+int treatPress;
+
+void setup1() {
+  // initialize the LED pin as an output:
+  pinMode(ledPin1, OUTPUT); // sweet potato
+  pinMode(ledPin2, OUTPUT); // peanut butter
+  pinMode(ledPin3, OUTPUT); // chicken
+  pinMode(ledPin4, OUTPUT); // bits
+  // initialize the pushbutton pin as an input:
+  pinMode(buttonPin, INPUT);
+}
+
+
+// Treat Counter Code
+
+void treatCheck()
+{
+  CurrentTreatType = digitalRead(buttonPin);
+  if (CurrentTreatType != LastTreatType)     //compare the TreatButtonStateCurrent to its previous state
+  {    
+    if (CurrentTreatType == HIGH)
+    {
+      buttonState = true;                                     // if the state has changed, increment the counter
+      buttonPressCount = buttonPressCount + 1;  // if the current state is HIGH then the button went from off to on:
+    }
+  }
+  LastTreatType = CurrentTreatType;             //save the current state as the last state, for next time through the loop
+}
+
+
+const int sensorPin =  A0;
+const int greenLED = 8;
+const int yellowLED = 9;
+const int redLED  = 10;
+
+void weight_setup() // feedback system (add, remove, keep)
+{
+  pinMode(greenLED, OUTPUT); 
+  pinMode(yellowLED, OUTPUT);
+  pinMode(redLED, OUTPUT);
+  Serial.begin(9600);
+}
+
+void weight_loop_treat_1() { // sweet potato
+  weight_loop();
+  float weight = LoadCell.getData();
+  if (weight >= 235.3) {
+    analogWrite(greenLED, 0);
+    analogWrite(yellowLED, 0);
+    analogWrite(redLED, 255);
+  }
+  else if (weight >= 226.8 && weight < 235.3) {
+    analogWrite(greenLED, 255);
+    analogWrite(yellowLED, 0);
+    analogWrite(redLED, 0);
+  }
+  else {
+    analogWrite(greenLED, 0);
+    analogWrite(yellowLED, 255);
+    analogWrite(redLED, 0);
+  }
+
+  delay(50);
+}
+
+void weight_loop_treat_2() { //peanut butter
+  weight_loop();
+  float weight = LoadCell.getData();
+  if (weight >= 246.64) {
+    digitalWrite(greenLED, LOW);
+    digitalWrite(yellowLED, LOW);
+    digitalWrite(redLED, HIGH);
+  }
+  else if (weight >= 238.14 && weight < 246.64) {
+    digitalWrite(greenLED, HIGH);
+    digitalWrite(yellowLED, LOW);
+    digitalWrite(redLED, LOW);
+  }
+  else {
+    digitalWrite(greenLED, LOW);
+    digitalWrite(yellowLED, HIGH);
+    digitalWrite(redLED, LOW);
+  }
+
+  delay(50);
+}
+
+void weight_loop_treat_3() { //chicken
+  weight_loop();
+  float weight = LoadCell.getData();
+  if (weight >= 235.3) {
+    digitalWrite(greenLED, LOW);
+    digitalWrite(yellowLED, LOW);
+    digitalWrite(redLED, HIGH);
+  }
+  else if (weight >= 226.8 && weight < 235.3) {
+    digitalWrite(greenLED, HIGH);
+    digitalWrite(yellowLED, LOW);
+    digitalWrite(redLED, LOW);
+  }
+  else {
+    digitalWrite(greenLED, LOW);
+    digitalWrite(yellowLED, HIGH);
+    digitalWrite(redLED, LOW);
+  }
+
+  delay(50);
+}
+
+
+void weight_loop_treat_4() { // bits
+  weight_loop();
+  float weight = LoadCell.getData();
+    if (weight >= 229.63) {
+    digitalWrite(greenLED, LOW);
+    digitalWrite(yellowLED, LOW);
+    digitalWrite(redLED, HIGH);
+  }
+  else if (weight >= 226.8 && weight < 229.63) {
+    digitalWrite(greenLED, HIGH);
+    digitalWrite(yellowLED, LOW);
+    digitalWrite(redLED, LOW);
+  }
+  else {
+    digitalWrite(greenLED, LOW);
+    digitalWrite(yellowLED, HIGH);
+    digitalWrite(redLED, LOW);
+  }
+
+  delay(50);
+}
+
+// LED lighting for treat type
+
+void loop() {
+  treatCheck();
+  if (buttonState == HIGH) {
+    if (buttonPressCount == 1) {
+      tarebutton();
+      analogWrite(ledPin1, 255); // turn LED1 on:
+        weight_loop_treat_1();
+    }
+    else {
+      analogWrite(ledPin1, 0);
+    }
+
+    if (buttonPressCount == 2) {
+     
+      analogWrite(ledPin2, 255); // turn LED2 on:
+        weight_loop_treat_2();
+    }
+    else {
+      analogWrite(ledPin2, 0);
+    }
+
+    if (buttonPressCount == 3) {
+      analogWrite(ledPin3, 255); // turn LED3 on:
+        weight_loop_treat_3();
+    }
+    else {
+      analogWrite(ledPin3, 0);
+    }
+
+    if (buttonPressCount == 4) {
+      analogWrite(ledPin4, 255); // turn LED4 on:
+        weight_loop_treat_4();
+    }
+    else {
+      analogWrite(ledPin4, 0);
+    }
+
+    if (buttonPressCount > 4) {
+      buttonPressCount = 0;              
+    }
+
+    delay(50);
+  }
+}
